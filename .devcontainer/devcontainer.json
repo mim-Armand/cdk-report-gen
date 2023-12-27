@@ -1,0 +1,46 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-dockerfile
+{
+	"name": "Existing Dockerfile",
+	"build": {
+		// Sets the run context to one level up instead of the .devcontainer folder.
+		"context": "..",
+		// Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
+		"dockerfile": "../Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {},
+		"ghcr.io/devcontainers-contrib/features/aws-cdk:2": {},
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+	},
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	"forwardPorts": [
+		// 9000
+	],
+	// Uncomment the next line to run commands after the container is created.
+	"postCreateCommand": "cat /etc/os-release &",
+	"mounts": [
+		"source=${env:HOME}${env:USERPROFILE}/.aws,target=/root/.aws,type=bind"
+	],
+	// Configure tool-specific properties.
+	"customizations": {
+		"vscode": {
+			// "settings": {
+			// 	"python.pythonPath": "/usr/bin/python3"
+			// }
+			"extensions": [
+				"amazonwebservices.aws-toolkit-vscode"
+			]
+		}
+	},
+	"portsAttributes": {
+		"3000": {
+			"label": "Hello Remote World",
+			"onAutoForward": "notify"
+		}
+	}
+	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "devcontainer"
+}

@@ -1,0 +1,30 @@
+{
+  "name": "cdk-report-gen",
+  "version": "1.0.0",
+  "description": "cdk report generation tool that uses serverless technologies and is setup using devcontainers",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mim-Armand/cdk-report-gen.git"
+  },
+  "keywords": [
+    "cdk",
+    "report",
+    "rds",
+    "dynamodb",
+    "sqs",
+    "s3",
+    "apigateway",
+    "DevContainer"
+  ],
+  "author": "mim",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/mim-Armand/cdk-report-gen/issues"
+  },
+  "homepage": "https://github.com/mim-Armand/cdk-report-gen#readme",
+  "dependencies": {}
+}
