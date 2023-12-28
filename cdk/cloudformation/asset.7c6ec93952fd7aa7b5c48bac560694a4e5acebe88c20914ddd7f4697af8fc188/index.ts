@@ -4,6 +4,7 @@ const sqs = new SQSClient();
 
 
 export const handler = async (event: APIGatewayEvent, context: Context): Promise<APIGatewayProxyResult> => {
+    console.log('>>>>>>>>111', handlerName);
     console.log(`Event: ${JSON.stringify(event, null, 2)}`);
     console.log(`Context: ${JSON.stringify(context, null, 2)}`);
     return {
@@ -16,9 +17,10 @@ export const handler = async (event: APIGatewayEvent, context: Context): Promise
 
 export const postReportHandler = async (event: { body: string; }) => {
     const body = JSON.parse(event.body);
+    console.log('>>>>>>>>222', handlerName, body);
     const command = new SendMessageCommand({
         MessageBody: JSON.stringify(body),
-        QueueUrl: process.env.MAIN_QUEUE_URL,
+        QueueUrl: process.env.QUEUE_URL,
     });
 
     try {
@@ -39,8 +41,9 @@ export const postReportHandler = async (event: { body: string; }) => {
 
 // This is to use the same dockerfile for all our lambdas (DRY)
 const handlerName = process.env.HANDLER_NAME || "index";
+console.log('>>>>>>>>', handlerName);
 
-let handlerFunction: any;
+let handlerFunction;
 switch (handlerName) {
   case 'index':
     handlerFunction = handler;
@@ -53,5 +56,5 @@ switch (handlerName) {
 }
 
 export const allHandlers = async (event: APIGatewayEvent, context: Context): Promise<APIGatewayProxyResult> => {
-    return await handlerFunction(event, context);
+    return await handler(event, context);
   };

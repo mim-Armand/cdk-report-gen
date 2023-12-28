@@ -66,7 +66,6 @@ export class ReportGenCdkStack extends cdk.Stack {
         MAIN_QUEUE_URL: mainQueue.queueUrl,
         HANDLER_NAME: 'index'
       },
-      architecture: Lambda.Architecture.X86_64,
       deadLetterQueue: mainDeadLetterQueue,
       deadLetterQueueEnabled: true,
       description: "Lambda function from docker image that will generate reports based on msgs it receives from sqs",
@@ -85,7 +84,6 @@ export class ReportGenCdkStack extends cdk.Stack {
         MAIN_QUEUE_URL: mainQueue.queueUrl,
         HANDLER_NAME: 'postReportHandler'
       },
-      architecture: Lambda.Architecture.X86_64,
       description: "Lambda function that will post a report to sqs",
       ephemeralStorageSize: cdk.Size.mebibytes(1024),
       functionName: `report-gen-01-post-report-${randomNumber}`,
@@ -97,8 +95,7 @@ export class ReportGenCdkStack extends cdk.Stack {
     });
     lambdaPostReport.addPermission('InvokeByApiGateway', {
       principal: new cdk.aws_iam.ServicePrincipal('apigateway.amazonaws.com'),
-    });
-    mainQueue.grantSendMessages(lambdaPostReport);
+    })
 
     const postIntegration = new apigateway.LambdaIntegration(lambdaPostReport);
     apigw.root.addMethod('POST', postIntegration);
