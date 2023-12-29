@@ -1,8 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { aws_lambda as Lambda, aws_sqs as Sqs } from 'aws-cdk-lib';
-import * as sqs from 'aws-cdk-lib/aws-sqs';
-import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import { aws_lambda as Lambda, aws_sqs as sqs, aws_s3 as s3, RemovalPolicy, aws_dynamodb as dynamodb, aws_apigateway as apigateway } from 'aws-cdk-lib';
 // import * as cdk from "@aws-cdk/core";
 import * as path from "path";
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
@@ -22,6 +20,64 @@ export class ReportGenCdkStack extends cdk.Stack {
     //   compatibleRuntimes: [Lambda.Runtime.NODEJS_18_X], // specify your runtime
     //   description: 'A layer for common dependencies',
     // });
+
+
+    
+    // --------------------- DynamoDB ---------------------
+    const reportsTable = new dynamodb.Table(this, 'reportsTable', {
+      partitionKey: {
+        name: 'id',
+        type: dynamodb.AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'sort',
+        type: dynamodb.AttributeType.STRING,
+      },
+      deletionProtection: false, // todo: change after PoC
+      tableName: `reports-table-${randomNumber}`,
+    })
+
+    // --------------------- S3 Bucket ---------------------
+    const lifecycleRules: s3.LifecycleRule = {
+      abortIncompleteMultipartUploadAfter: cdk.Duration.days(3),
+      enabled: false,
+      expiration: cdk.Duration.days(39),
+      expirationDate: new Date(),
+      expiredObjectDeleteMarker: false,
+      id: 'id',
+      noncurrentVersionExpiration: cdk.Duration.days(60),
+      noncurrentVersionsToRetain: 54,
+      noncurrentVersionTransitions: [{
+        storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+        transitionAfter: cdk.Duration.days(30),
+        // the properties below are optional
+        noncurrentVersionsToRetain: 123,
+      }],
+      prefix: 'report', // if an object prefix changes, the lifecycle will ignore it ( IE: remains where it is )
+      transitions: [{
+        storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+        transitionAfter: cdk.Duration.days(33),
+        transitionDate: new Date(),
+      },
+      {
+        storageClass: s3.StorageClass.GLACIER,
+        transitionAfter: cdk.Duration.days(99),
+        transitionDate: new Date(),
+      }
+    ],
+    };
+
+    const reportsBucket = new s3.Bucket(this, 'ReportsBucket', {
+      removalPolicy: RemovalPolicy.DESTROY, //todo this needs to be RETAIN outside of PoC
+      autoDeleteObjects: true,  //todo this needs to be RETAIN outside of PoC
+      bucketName: `generated-reports-${randomNumber}`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      versioned: true,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      eventBridgeEnabled: true,
+      lifecycleRules: [lifecycleRules]
+    })
 
     const mainDeadLetterQueue = new sqs.Queue(this, 'MainDeadLetterQueue', {
       queueName: `MainDeadLetterQueue-${randomNumber}`
