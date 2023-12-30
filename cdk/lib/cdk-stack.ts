@@ -41,28 +41,25 @@ export class ReportGenCdkStack extends cdk.Stack {
     const lifecycleRules: s3.LifecycleRule = {
       abortIncompleteMultipartUploadAfter: cdk.Duration.days(3),
       enabled: false,
-      expiration: cdk.Duration.days(39),
-      expirationDate: new Date(),
       expiredObjectDeleteMarker: false,
       id: 'id',
-      noncurrentVersionExpiration: cdk.Duration.days(60),
-      noncurrentVersionsToRetain: 54,
-      noncurrentVersionTransitions: [{
-        storageClass: s3.StorageClass.INFREQUENT_ACCESS,
-        transitionAfter: cdk.Duration.days(30),
-        // the properties below are optional
-        noncurrentVersionsToRetain: 123,
-      }],
+      // expiration: cdk.Duration.days(39),
+      // noncurrentVersionExpiration: cdk.Duration.days(60),
+      // noncurrentVersionsToRetain: 54,
+      // noncurrentVersionTransitions: [{
+      //   storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+      //   transitionAfter: cdk.Duration.days(99),
+      //   // the properties below are optional
+      //   noncurrentVersionsToRetain: 123,
+      // }],
       prefix: 'report', // if an object prefix changes, the lifecycle will ignore it ( IE: remains where it is )
       transitions: [{
         storageClass: s3.StorageClass.INFREQUENT_ACCESS,
         transitionAfter: cdk.Duration.days(33),
-        transitionDate: new Date(),
       },
       {
         storageClass: s3.StorageClass.GLACIER,
         transitionAfter: cdk.Duration.days(99),
-        transitionDate: new Date(),
       }
     ],
     };
