@@ -1,6 +1,14 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { aws_lambda as Lambda, aws_sqs as sqs, aws_s3 as s3, RemovalPolicy, aws_dynamodb as dynamodb, aws_apigateway as apigateway } from 'aws-cdk-lib';
+import { 
+  aws_lambda      as Lambda,
+  aws_sqs         as sqs, 
+  aws_s3          as s3, RemovalPolicy,
+  aws_dynamodb    as dynamodb,
+  aws_apigateway  as apigateway,
+  aws_apigatewayv2 as apigatewayv2,
+  aws_iam         as iam,
+     } from 'aws-cdk-lib';
 // import * as cdk from "@aws-cdk/core";
 import * as path from "path";
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
@@ -22,8 +30,21 @@ export class ReportGenCdkStack extends cdk.Stack {
     // });
 
 
-    
+
     // --------------------- DynamoDB ---------------------
+    const gsi1: dynamodb.GlobalSecondaryIndexProps = {
+      indexName: "requestedByUser",
+      partitionKey: {
+        name: 'userId',
+        type: dynamodb.AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'timeStamp',
+        type: dynamodb.AttributeType.STRING
+      },
+      projectionType: dynamodb.ProjectionType.ALL, // this includes all nonKey attributes, but should be changed to INCLUDE if the record is large
+      // nonKeyAttributes: ['status'], // include any fields that is needed when querying secondary indexes
+    };
     const reportsTable = new dynamodb.Table(this, 'reportsTable', {
       partitionKey: {
         name: 'id',
@@ -33,9 +54,11 @@ export class ReportGenCdkStack extends cdk.Stack {
         name: 'sort',
         type: dynamodb.AttributeType.STRING,
       },
+      removalPolicy: RemovalPolicy.DESTROY, // todo: in a real env this should be changed to retain
       deletionProtection: false, // todo: change after PoC
       tableName: `reports-table-${randomNumber}`,
     })
+    reportsTable.addGlobalSecondaryIndex(gsi1);
 
     // --------------------- S3 Bucket ---------------------
     const lifecycleRules: s3.LifecycleRule = {
@@ -75,7 +98,7 @@ export class ReportGenCdkStack extends cdk.Stack {
       eventBridgeEnabled: true,
       lifecycleRules: [lifecycleRules]
     })
-
+    // --------------------- SQS ---------------------
     const mainDeadLetterQueue = new sqs.Queue(this, 'MainDeadLetterQueue', {
       queueName: `MainDeadLetterQueue-${randomNumber}`
     });
@@ -87,8 +110,112 @@ export class ReportGenCdkStack extends cdk.Stack {
         queue: mainDeadLetterQueue,
       }
     });
+    // --------------------- EventBridge ---------------------
+    const scheduleSqsRole = new iam.Role(this, 'scheduleSqsRole', {
+      roleName: `schedule-sqs-role-${randomNumber}`,
+      description: 'This role lets EventBridge Scheduler to send messages to SQS',
+      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com')
+    });
+    scheduleSqsRole.addToPolicy(new iam.PolicyStatement({
+      actions:['sqs:SendMessage'],
+      resources:[mainQueue.queueArn, mainDeadLetterQueue.queueArn]
+    }));
 
-    
+    const reportsEventbridgeScheduleGroup = new cdk.aws_scheduler.CfnScheduleGroup(this, 'reportsEventbridgeScheduleGroup',
+    {
+      name: `reports-shcedule-group-${randomNumber}`, // todo: this needs to be passed to the lambda env so events are added to the right group
+      tags:[{
+        key: 'system',
+        value: 'report-gen'
+      }]
+    });
+
+    // const schedulerEventBus = new cdk.aws_events.EventBus(this, 'schedulerEventBus', {
+    //   eventBusName: `scheduler-event-bus-${randomNumber}`
+    // })
+
+
+
+    // --------------------- Lambda ---------------------
+    // Create AWS Lambda function and push image to ECR
+    const lambdaSqsConsumer = new Lambda.DockerImageFunction(this, "function", {
+      code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
+      environment: {
+        MAIN_QUEUE_URL: mainQueue.queueUrl,
+        HANDLER_NAME: 'sqsMsgHandler'
+      },
+      architecture: Lambda.Architecture.X86_64,
+      deadLetterQueue: mainDeadLetterQueue,
+      deadLetterQueueEnabled: true,
+      description: "Lambda function from docker image that will generate reports based on msgs it receives from sqs",
+      ephemeralStorageSize: cdk.Size.mebibytes(1024),
+      events: [new SqsEventSource(mainQueue, { batchSize: 6 })],
+      functionName: `report-gen-01-${randomNumber}`,
+      logRetention: 30, // defaults to 14
+      // vpc: undefined, // defaults to undefined
+      // vpcSubnets: undefined, // defaults to undefinedx
+    });
+
+    const lambdaGetTest = new Lambda.DockerImageFunction(this, 'lambdaGetTest', {
+      code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
+      environment: {
+        HANDLER_NAME: 'index'
+      },
+      architecture: Lambda.Architecture.X86_64,
+      description: "Lambda function that will simply echoes back ( for testing and diag )",
+      functionName: `report-gen-01-test-${randomNumber}`
+    });
+
+    const lambdaPostReport = new Lambda.DockerImageFunction(this, 'lambdaPostReport', {
+      code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
+      environment: {
+        MAIN_QUEUE_URL: mainQueue.queueUrl,
+        HANDLER_NAME: 'postReportHandler'
+      },
+      architecture: Lambda.Architecture.X86_64,
+      description: "Lambda function that will post a report to sqs",
+      ephemeralStorageSize: cdk.Size.mebibytes(1024),
+      functionName: `report-gen-01-post-report-${randomNumber}`,
+      deadLetterQueue: mainDeadLetterQueue,
+      deadLetterQueueEnabled: true,
+      // logRetention: 30, // defaults to 14
+      // vpc: undefined, // defaults to undefined
+      // vpcSubnets: undefined, // defaults to undefinedx
+    });
+    lambdaPostReport.addPermission('InvokeByApiGateway', {
+      principal: new cdk.aws_iam.ServicePrincipal('apigateway.amazonaws.com'),
+    });
+    mainQueue.grantSendMessages(lambdaPostReport);
+    mainDeadLetterQueue.grantConsumeMessages(lambdaPostReport);
+
+    const lambdaPostSchedule = new Lambda.DockerImageFunction(this, 'lambdaPostSchedule', {
+      code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
+      environment: {
+        MAIN_QUEUE_URL: mainQueue.queueUrl,
+        MAIN_QUEUE_ARN: mainQueue.queueArn,
+        DEAD_QUEUE_ARN: mainDeadLetterQueue.queueArn,
+        HANDLER_NAME: 'postScheduleHandler',
+        SCHEDULE_SQS_ROLE_URL: scheduleSqsRole.roleArn,
+        // EVENT_BUS_NAME: schedulerEventBus.eventBusName,
+        SCHEDULE_GROUP_NAME: reportsEventbridgeScheduleGroup.name || 'default',
+      },
+      architecture: Lambda.Architecture.X86_64,
+      description: "Lambda function that will post a schedule to generate reports on a cron or rate",
+      functionName: `report-gen-01-schedule-report-${randomNumber}`,
+      deadLetterQueue: mainDeadLetterQueue,
+      deadLetterQueueEnabled: true,
+    });
+    lambdaPostSchedule.addPermission('InvokeByApiGateway', {
+      principal: new cdk.aws_iam.ServicePrincipal('apigateway.amazonaws.com'),
+    });
+    mainQueue.grantConsumeMessages(lambdaPostSchedule);
+    mainDeadLetterQueue.grantConsumeMessages(lambdaPostSchedule);
+    // schedulerEventBus.grantPutEventsTo(lambdaPostSchedule);
+    lambdaPostSchedule.role?.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['events:PutRule', 'iam:PassRole', 'scheduler:CreateSchedule'],
+      resources: ['*'],
+    }))
+    // --------------------- APIGateway ---------------------
     const apigw = new apigateway.RestApi(this, 'apigw', {
       restApiName: 'report-gen-01',
       endpointExportName: 'report-gen-01-endpoint',
@@ -112,53 +239,16 @@ export class ReportGenCdkStack extends cdk.Stack {
       apiKeySourceType: apigateway.ApiKeySourceType.HEADER, // defaults to HEADER
     });
 
-    // Create AWS Lambda function and push image to ECR
-    const lambdaSqsConsumer = new Lambda.DockerImageFunction(this, "function", { //todo: remove this one later
-      code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
-      environment: {
-        MAIN_QUEUE_URL: mainQueue.queueUrl,
-        HANDLER_NAME: 'index'
-      },
-      architecture: Lambda.Architecture.X86_64,
-      deadLetterQueue: mainDeadLetterQueue,
-      deadLetterQueueEnabled: true,
-      description: "Lambda function from docker image that will generate reports based on msgs it receives from sqs",
-      ephemeralStorageSize: cdk.Size.mebibytes(1024),
-      events: [new SqsEventSource(mainQueue, { batchSize: 6 })],
-      functionName: `report-gen-01-${randomNumber}`,
-      logRetention: 30, // defaults to 14
-      // vpc: undefined, // defaults to undefined
-      // vpcSubnets: undefined, // defaults to undefinedx
-    });
+    const getTest = new apigateway.LambdaIntegration(lambdaGetTest);
+    const testResource = apigw.root.addMethod(apigatewayv2.HttpMethod.GET, getTest);
 
+    const reportResource = apigw.root.addResource('reports');
+    const postReport = new apigateway.LambdaIntegration(lambdaPostReport);
+    reportResource.addMethod(apigatewayv2.HttpMethod.POST, postReport);
 
-    const lambdaPostReport = new Lambda.DockerImageFunction(this, 'lambdaPostReport', {
-      code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
-      environment: {
-        MAIN_QUEUE_URL: mainQueue.queueUrl,
-        HANDLER_NAME: 'postReportHandler'
-      },
-      architecture: Lambda.Architecture.X86_64,
-      description: "Lambda function that will post a report to sqs",
-      ephemeralStorageSize: cdk.Size.mebibytes(1024),
-      functionName: `report-gen-01-post-report-${randomNumber}`,
-      deadLetterQueue: mainDeadLetterQueue,
-      deadLetterQueueEnabled: true,
-      // logRetention: 30, // defaults to 14
-      // vpc: undefined, // defaults to undefined
-      // vpcSubnets: undefined, // defaults to undefinedx
-    });
-    lambdaPostReport.addPermission('InvokeByApiGateway', {
-      principal: new cdk.aws_iam.ServicePrincipal('apigateway.amazonaws.com'),
-    });
-    mainQueue.grantSendMessages(lambdaPostReport);
+    const scheduleResource = reportResource.addResource('schedules');
+    const postSchedule = new apigateway.LambdaIntegration(lambdaPostSchedule);
+    scheduleResource.addMethod(apigatewayv2.HttpMethod.POST, postSchedule)
 
-    const postIntegration = new apigateway.LambdaIntegration(lambdaPostReport);
-    apigw.root.addMethod('POST', postIntegration);
-
-    // example resource
-    // const queue = new sqs.Queue(this, 'CdkQueue', {
-    //   visibilityTimeout: cdk.Duration.seconds(300)
-    // });
   }
 }
