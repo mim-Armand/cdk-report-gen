@@ -77,7 +77,6 @@ export const sqsMsgHandler = async (event: { body: string; }, context: any) => {
     };
 };
 
-const eventBridgeClient = new EventBridgeClient();
 const schedulerClient = new SchedulerClient();
 
 const isSchedRequsetValid = (body: any) => {
@@ -141,11 +140,11 @@ export const postScheduleHandler = async (event: any) => { //todo: update the ty
                 // MaximumEventAgeInSeconds: Number("int"),
                 MaximumRetryAttempts: Number(3),
             },
-            Input: "test input, change to json later!",
-            // Input: JSON.stringify({
-            //     ...body,
-            //     scheduled: true,
-            // }), //todo: check, this might need to be stringified
+            // Input: "test input, change to json later!",
+            Input: JSON.stringify({
+                ...body,
+                scheduled: true,
+            }), //todo: check, this might need to be stringified
             //   EventBridgeParameters: { // EventBridgeParameters
             //     DetailType: "STRING_VALUE", // required
             //     Source: "STRING_VALUE", // required
