@@ -170,7 +170,8 @@ export class ReportGenCdkStack extends cdk.Stack {
       code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
       environment: {
         MAIN_QUEUE_URL: mainQueue.queueUrl,
-        HANDLER_NAME: 'postReportHandler'
+        HANDLER_NAME: 'postReportHandler',
+        REPORTS_TABLE_NAME: reportsTable.tableName,
       },
       architecture: Lambda.Architecture.X86_64,
       description: "Lambda function that will post a report to sqs",
@@ -187,6 +188,8 @@ export class ReportGenCdkStack extends cdk.Stack {
     });
     mainQueue.grantSendMessages(lambdaPostReport);
     mainDeadLetterQueue.grantConsumeMessages(lambdaPostReport);
+    reportsTable.grantReadWriteData(lambdaPostReport);
+    
 
     const lambdaPostSchedule = new Lambda.DockerImageFunction(this, 'lambdaPostSchedule', {
       code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
@@ -210,6 +213,7 @@ export class ReportGenCdkStack extends cdk.Stack {
     });
     mainQueue.grantConsumeMessages(lambdaPostSchedule);
     mainDeadLetterQueue.grantConsumeMessages(lambdaPostSchedule);
+    reportsTable.grantReadWriteData(lambdaPostSchedule);
     // schedulerEventBus.grantPutEventsTo(lambdaPostSchedule);
     lambdaPostSchedule.role?.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['events:PutRule', 'iam:PassRole', 'scheduler:CreateSchedule'],

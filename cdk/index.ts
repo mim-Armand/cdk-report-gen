@@ -1,10 +1,13 @@
 import { Context, APIGatewayProxyResult, APIGatewayEvent } from 'aws-lambda';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { EventBridgeClient, PutRuleCommand, RuleState } from "@aws-sdk/client-eventbridge";
 import { SchedulerClient, ListSchedulesCommand, ScheduleState, FlexibleTimeWindowMode, ActionAfterCompletion, CreateScheduleCommand } from '@aws-sdk/client-scheduler';
 import { TimeZone } from 'aws-cdk-lib';
+import { DynamoDB, DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, GetCommand, DynamoDBDocument } from '@aws-sdk/lib-dynamodb';
 const sqs = new SQSClient();
-
+// const dynamoClient = new DynamoDBClient({});
+// const dynamo = DynamoDBDocumentClient.from(dynamoClient);
+const ddb = new DynamoDB({apiVersion: "2012-08-10"});
 
 export const handler = async (event: APIGatewayEvent, context: Context): Promise<APIGatewayProxyResult> => {
     console.log(`Event: ${JSON.stringify(event, null, 2)}`);
@@ -17,6 +20,7 @@ export const handler = async (event: APIGatewayEvent, context: Context): Promise
         }),
     };
 };
+
 
 const sampleReportRecord = {
     requestedBy: "user_id",
@@ -35,22 +39,37 @@ export const postReportHandler = async (event: { body: string; }) => {
     });
     // 1. access control
     // if access denied log the request and notify ( as it might be an early sign of an intrusion attempt )
-    // 2. Assign a UUID to the report and add it to the:
-    // (Dynamo)DB
-    // SQS
+    // 2. Post the msg to SQS and get the UUID
+    // 3. add the record ro dynamodb
     // 3. return the report UUID and 200 success message
 
     try {
-        await sqs.send(command);
+        const res = await sqs.send(command);
+        const dynamoRes = await ddb.putItem({
+            TableName: process.env.REPORTS_TABLE_NAME,
+            ReturnValues: "NONE",
+            Item: {
+                userId: { S: body.requestedBy || 'system' },
+                timestamp: { S: new Date().toISOString() },
+                reportId: { S: res.MessageId || '000' },
+                id: { S: res.MessageId || '000' },
+                sort: { S: new Date().toISOString() },
+                // ...sampleReportRecord,
+            }
+        });
+        // const dbRes = await dynamo.send
         return {
             statusCode: 200,
-            body: JSON.stringify({ message: 'Message sent to SQS' }),
+            body: JSON.stringify({ 
+                messageId: res.MessageId,message: 'Message sent to SQS',
+                dynamoRes, sqsRes: res
+         }),
         };
     } catch (error) {
         console.error(error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Error sending message to SQS' }),
+            body: JSON.stringify({ error: 'Error sending message to SQS', msg: error }),
         };
     }
 };

@@ -24,9 +24,11 @@
   },
   "dependencies": {
     "@aws-cdk/aws-lambda": "^1.204.0",
+    "@aws-sdk/client-dynamodb": "^3.496.0",
     "@aws-sdk/client-eventbridge": "^3.484.0",
     "@aws-sdk/client-scheduler": "^3.485.0",
     "@aws-sdk/client-sqs": "^3.481.0",
+    "@aws-sdk/lib-dynamodb": "^3.496.0",
     "@types/aws-lambda": "^8.10.130",
     "aws-cdk-lib": "2.114.1",
     "constructs": "^10.0.0",
