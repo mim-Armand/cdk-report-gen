@@ -3,12 +3,13 @@ import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SchedulerClient, ListSchedulesCommand, ScheduleState, FlexibleTimeWindowMode, ActionAfterCompletion, CreateScheduleCommand } from '@aws-sdk/client-scheduler';
 import { TimeZone } from 'aws-cdk-lib';
 import { DynamoDB, DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, GetCommand, DynamoDBDocument } from '@aws-sdk/lib-dynamodb';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 const sqs = new SQSClient();
 // const dynamoClient = new DynamoDBClient({});
 // const dynamo = DynamoDBDocumentClient.from(dynamoClient);
 const ddb = new DynamoDB({apiVersion: "2012-08-10"});
-
+const schedulerClient = new SchedulerClient();
+const s3Client = new S3Client();
 export const handler = async (event: APIGatewayEvent, context: Context): Promise<APIGatewayProxyResult> => {
     console.log(`Event: ${JSON.stringify(event, null, 2)}`);
     console.log(`Context: ${JSON.stringify(context, null, 2)}`);
@@ -24,7 +25,7 @@ export const handler = async (event: APIGatewayEvent, context: Context): Promise
 
 const sampleReportRecord = {
     requestedBy: "user_id",
-    downloadedBy: ["user1", "user 2"],
+    downloadedBy: [{user: "user1", timestamp: "", metadata: {}}],
     scheduled: false,
     status: 10,
     createdAt: "123",
@@ -40,7 +41,7 @@ export const postReportHandler = async (event: { body: string; }) => {
     // 1. access control
     // if access denied log the request and notify ( as it might be an early sign of an intrusion attempt )
     // 2. Post the msg to SQS and get the UUID
-    // 3. add the record ro dynamodb
+    // 3. add the record ro dynamodb ( alert if already exist )
     // 3. return the report UUID and 200 success message
 
     try {
@@ -54,10 +55,12 @@ export const postReportHandler = async (event: { body: string; }) => {
                 reportId: { S: res.MessageId || '000' },
                 id: { S: res.MessageId || '000' },
                 sort: { S: new Date().toISOString() },
+                scheduled: { BOOL: false },
+                status: { N: '0' },
+                // touched: { N: "1"},
                 // ...sampleReportRecord,
             }
         });
-        // const dbRes = await dynamo.send
         return {
             statusCode: 200,
             body: JSON.stringify({ 
@@ -74,10 +77,38 @@ export const postReportHandler = async (event: { body: string; }) => {
     }
 };
 
+const isReportGenRequsetValid = (body: any) => {
+    if (typeof body !== 'object') return false; // this checks for the type of the body
+    //todo:
+    // 1. check regexp for reportName
+    // 2. check for the required fields
+    const requiredFields = {
+        reportName: 'report_name',
+        requestedBy: 'userId',
+        reportType: 'report-123',
+    }
+    
+    // if (Object.keys(body).length === 0) return false; // this checks for the length of the body ( if it's empty )
+    // if (Object.keys(body).length !== Object.keys(requiredFields).length) return false; // this checks for the length of the body ( if it's empty )
+    // if (Object.keys(body).some(key => !requiredFields[key])) return false; // this checks for the required keys ( if it's empty )
+    // if (Object.keys(body).some(key => !body[key])) return false; // this checks for the required keys ( if it's empty )
+    // if (Object.keys(body).some(key => typeof body[key] !== 'string')) return false; // this checks for the required keys ( if it's empty )
+    // if (Object.keys(body).some(key => body[key].length === 0)) return false; // this checks for the required keys ( if it's empty )
 
-export const sqsMsgHandler = async (event: { body: string; }, context: any) => {
-    // const body = JSON.parse(event.body);
-    // 1. update the (dynamo) record ( mark and add to the number of the attempted progress on the report )
+    return Object.keys(requiredFields).every(key => key in body); // this checks for all the required keys
+}
+export const sqsMsgHandler = async (event: { Records: [{body: string}]; }, context: any) => {
+    //todo: put the error messages in an array in Dynamodb
+    console.log('starting the sqsMsgHandler ...');
+    if(typeof event !== 'object') throw new Error('The event passed form SQS should always be a json.');
+    const msgs = event.Records;
+    if( msgs.length !== 1 ) throw new Error( `We shouldn't have received more or less than 1 message. (actual count= ${msgs.length})`); // else use: event.Records.forEach(record => {
+    const msg = msgs[0];
+    const msgBody = validateAndParse(msg.body);
+    if (!msgBody) throw new Error( 'Bad Request: Message Body is not valid JSON. >>' + msg.body);
+    if (!isReportGenRequsetValid(msgBody)) throw new Error('Bad Request: the required fields are missing from the message.');
+    
+    // 1. update the (dynamo) record ( mark and add to the number of the attempted progress on the report: touched++ )
     // 2. access control ( double check that the requested report and requested user roles patch )
     // If not, log and notify
     // 3. attempt to query the db based on the requested report type
@@ -88,15 +119,32 @@ export const sqsMsgHandler = async (event: { body: string; }, context: any) => {
     // E. error handling and DQL logic as appropriate
     console.log(`sqsMsgHandler event: >>> ${JSON.stringify(event, null, 2)}`);
     console.log(`sqsMsgHandler Context: >>> ${JSON.stringify(context, null, 2)}`);
+    const allocatedMemory = process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE;
+    const usedMemory = process.memoryUsage();
+    for (let key in usedMemory) {
+        console.log(`>>> ${key} ${Math.round(usedMemory[key] / 1024 / 1024 * 100) / 100} MB`);
+      }
+    console.log(`>>> Allocated Memory: ${allocatedMemory} MB`);
+
+    //1. Ignored for PoC
+    //2. Ignored for PoC
+    //3. DB response is mocked
+    //4. The report file can be generated with excel4node or Python scripts
+    console.log(' puttin a the file in the S3 bucket', process.env.S3_BUCKET_NAME);
+
+    const s3Res = await s3Client.send(new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: msgBody.reportName,
+        Body: 'Hello World!',
+    }));
     return {
         statusCode: 200,
         body: JSON.stringify({
             message: 'hello world',
+            s3Res,
         }),
     };
 };
-
-const schedulerClient = new SchedulerClient();
 
 const isSchedRequsetValid = (body: any) => {
     const requiredFields = {

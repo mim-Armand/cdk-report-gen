@@ -18,18 +18,13 @@ export class ReportGenCdkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    // adding tags to all the resources in the stack:
+    cdk.Tags.of(this).add('prjct', 'report-gen-01');
+
     // Generate a random number as a suffix
     const randomNumber = Math.floor(Math.random() * 10000);
 
     const dockerfile = path.join(__dirname, "../");
-
-    // const nodeLayer = new Lambda.LayerVersion(this, 'nodeLayer', {
-    //   code: Lambda.Code.fromAsset('path/to/your/lambda-layer'),
-    //   compatibleRuntimes: [Lambda.Runtime.NODEJS_18_X], // specify your runtime
-    //   description: 'A layer for common dependencies',
-    // });
-
-
 
     // --------------------- DynamoDB ---------------------
     const gsi1: dynamodb.GlobalSecondaryIndexProps = {
@@ -124,17 +119,7 @@ export class ReportGenCdkStack extends cdk.Stack {
     const reportsEventbridgeScheduleGroup = new cdk.aws_scheduler.CfnScheduleGroup(this, 'reportsEventbridgeScheduleGroup',
     {
       name: `reports-shcedule-group-${randomNumber}`, // todo: this needs to be passed to the lambda env so events are added to the right group
-      tags:[{
-        key: 'system',
-        value: 'report-gen'
-      }]
     });
-
-    // const schedulerEventBus = new cdk.aws_events.EventBus(this, 'schedulerEventBus', {
-    //   eventBusName: `scheduler-event-bus-${randomNumber}`
-    // })
-
-
 
     // --------------------- Lambda ---------------------
     // Create AWS Lambda function and push image to ECR
@@ -142,7 +127,9 @@ export class ReportGenCdkStack extends cdk.Stack {
       code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
       environment: {
         MAIN_QUEUE_URL: mainQueue.queueUrl,
-        HANDLER_NAME: 'sqsMsgHandler'
+        HANDLER_NAME: 'sqsMsgHandler',
+        REPORTS_TABLE_NAME: reportsTable.tableName,
+        S3_BUCKET_NAME: reportsBucket.bucketName,
       },
       architecture: Lambda.Architecture.X86_64,
       deadLetterQueue: mainDeadLetterQueue,
@@ -150,11 +137,12 @@ export class ReportGenCdkStack extends cdk.Stack {
       description: "Lambda function from docker image that will generate reports based on msgs it receives from sqs",
       ephemeralStorageSize: cdk.Size.mebibytes(1024),
       events: [new SqsEventSource(mainQueue, { batchSize: 6 })],
-      functionName: `report-gen-01-${randomNumber}`,
+      functionName: `report-gen-sqs-consumer-01-${randomNumber}`,
       logRetention: 30, // defaults to 14
       // vpc: undefined, // defaults to undefined
       // vpcSubnets: undefined, // defaults to undefinedx
     });
+    reportsBucket.grantWrite(lambdaSqsConsumer);
 
     const lambdaGetTest = new Lambda.DockerImageFunction(this, 'lambdaGetTest', {
       code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
