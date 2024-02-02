@@ -34,7 +34,7 @@ export class ReportGenCdkStack extends cdk.Stack {
         type: dynamodb.AttributeType.STRING,
       },
       sortKey: {
-        name: 'timeStamp',
+        name: 'timestamp',
         type: dynamodb.AttributeType.STRING
       },
       projectionType: dynamodb.ProjectionType.ALL, // this includes all nonKey attributes, but should be changed to INCLUDE if the record is large
@@ -207,6 +207,20 @@ export class ReportGenCdkStack extends cdk.Stack {
       actions: ['events:PutRule', 'iam:PassRole', 'scheduler:CreateSchedule'],
       resources: ['*'],
     }))
+
+    const lambdaGetReports = new Lambda.DockerImageFunction(this, 'lambdaGetReports', {
+      code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
+      environment: {
+        REPORTS_TABLE_NAME: reportsTable.tableName,
+        HANDLER_NAME: 'getReportsHandler',
+      },
+      architecture: Lambda.Architecture.X86_64,
+      description: "Lambda function that will get a list of reports based on userId found in the trusted headers or JWT",
+      functionName: `report-gen-01-get-reports-${randomNumber}`,
+      deadLetterQueue: mainDeadLetterQueue,
+      deadLetterQueueEnabled: true,
+    });
+    reportsTable.grantReadData(lambdaGetReports);
     // --------------------- APIGateway ---------------------
     const apigw = new apigateway.RestApi(this, 'apigw', {
       restApiName: 'report-gen-01',
@@ -241,6 +255,10 @@ export class ReportGenCdkStack extends cdk.Stack {
     const scheduleResource = reportResource.addResource('schedules');
     const postSchedule = new apigateway.LambdaIntegration(lambdaPostSchedule);
     scheduleResource.addMethod(apigatewayv2.HttpMethod.POST, postSchedule)
+
+    const getReportsList = new apigateway.LambdaIntegration(lambdaGetReports);
+    const getReports = reportResource.addResource('list');
+    getReports.addMethod(apigatewayv2.HttpMethod.GET, getReportsList);
 
   }
 }

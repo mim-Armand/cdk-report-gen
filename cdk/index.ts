@@ -7,7 +7,7 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 const sqs = new SQSClient();
 // const dynamoClient = new DynamoDBClient({});
 // const dynamo = DynamoDBDocumentClient.from(dynamoClient);
-const ddb = new DynamoDB({apiVersion: "2012-08-10"});
+const ddb = new DynamoDB();
 const schedulerClient = new SchedulerClient();
 const s3Client = new S3Client();
 export const handler = async (event: APIGatewayEvent, context: Context): Promise<APIGatewayProxyResult> => {
@@ -240,6 +240,41 @@ export const postScheduleHandler = async (event: any) => { //todo: update the ty
     };
 }
 
+export const getReportsHandler = async (event: any, context: any) => {
+    // 1. the user id is taken from the trusted headers and JWT and not coming from the request body or client
+    // 2. access control ( omitted from PoC )
+    // 3. this endpoint provides paginated results and the requested page can be obtained from url params ( Omitted from PoC )
+    // 4. Query the DB with the user ID and return the last 10 items with IDs ( ID can be encrypted, but this is omitted in PoC )
+    const params = {
+        TableName: process.env.REPORTS_TABLE_NAME,
+        IndexName: 'requestedByUser',
+        KeyConditionExpression: "#userId = :userId",
+        ExpressionAttributeNames: {
+            "#userId": "userId"
+          },
+        ScanIndexForward: false,
+        Limit: 10,
+        ExpressionAttributeValues: {
+            ':userId': { S: "mim" },
+        },
+        // ExclusiveStartKey: lastEvaluatedKey // TODO:  For pagination, we can check if the value is passed from the client
+    }
+    console.log('>>>params: ', params)
+    
+        return ddb.query(params).then(res => {
+            console.log('>>>>>', res)
+            return {
+                statusCode: 200,
+                body: JSON.stringify({res}),
+            };
+        }).catch(err => {
+            console.log('Error querying DynamoDB', err);
+            throw err;
+        })
+        
+
+}
+
 
 // This is to use the same dockerfile for all our lambdas (DRY)
 const handlerName = process.env.HANDLER_NAME || "index";
@@ -257,6 +292,9 @@ switch (handlerName) {
         break;
     case 'postScheduleHandler':
         handlerFunction = postScheduleHandler;
+        break;
+    case 'getReportsHandler':
+        handlerFunction = getReportsHandler;
         break;
     default:
         handlerFunction = handler;
