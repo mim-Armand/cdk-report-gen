@@ -3,7 +3,8 @@ import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SchedulerClient, ListSchedulesCommand, ScheduleState, FlexibleTimeWindowMode, ActionAfterCompletion, CreateScheduleCommand } from '@aws-sdk/client-scheduler';
 import { TimeZone } from 'aws-cdk-lib';
 import { DynamoDB, DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand, S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 const sqs = new SQSClient();
 // const dynamoClient = new DynamoDBClient({});
 // const dynamo = DynamoDBDocumentClient.from(dynamoClient);
@@ -97,6 +98,7 @@ const isReportGenRequsetValid = (body: any) => {
 
     return Object.keys(requiredFields).every(key => key in body); // this checks for all the required keys
 }
+const s3Extension = '.txt';
 export const sqsMsgHandler = async (event: { Records: [{body: string}]; }, context: any) => {
     //todo: put the error messages in an array in Dynamodb
     console.log('starting the sqsMsgHandler ...');
@@ -134,7 +136,7 @@ export const sqsMsgHandler = async (event: { Records: [{body: string}]; }, conte
 
     const s3Res = await s3Client.send(new PutObjectCommand({
         Bucket: process.env.S3_BUCKET_NAME,
-        Key: msgBody.reportName,
+        Key: msg.messageId + s3Extension, // this is the same as the dynamodb record id
         Body: 'Hello World!',
     }));
     return {
@@ -276,6 +278,53 @@ export const getReportsHandler = async (event: any, context: any) => {
 }
 
 
+export const getReportByIdHandler = async (event: any, context: any) => {
+    // 1. the user id is taken from the trusted headers and JWT and not coming from the request body or client
+    // 2. access control ( omitted from PoC )
+    // 3. Query the DB with the report ID ( double check user access with the returned data )
+    // 4. using the S3 object name make a temporary download link and return it
+
+    const queryString = event.queryStringParameters.id;
+    if(!queryString) return errResponse(400, 'Bad Request: Missing report id in the query string');
+
+    const params = {
+        TableName: process.env.REPORTS_TABLE_NAME,
+        Key: {
+            id: { S: queryString },
+        },
+    };
+
+    return ddb.getItem(params).then(async res => {
+        console.log('>>>>>', res)
+        //TODO:
+        // check that user has access and report id is indeed in the db ( preventing request for random objects )
+        // produce and return a signed URL
+        if(!res.Item) return errResponse(404, 'Not Found: The requested report was not found');
+        const command = new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: res.Item.reportId.S + s3Extension,
+        });
+        const signedUrl = await getSignedUrl(s3Client, command, {
+            expiresIn: 30, // seconds, defaults at 900
+        });
+        return {
+            statusCode: 200,
+            body: JSON.stringify({res, signedUrl}),
+        };
+    })
+    .catch(err => {
+        return errResponse(500, 'Internal Server Error: ' + err.message)
+    })
+
+
+    return {
+        statusCode: 200,
+        body: JSON.stringify({event, context}),
+    };
+
+}
+
+
 // This is to use the same dockerfile for all our lambdas (DRY)
 const handlerName = process.env.HANDLER_NAME || "index";
 
@@ -295,6 +344,9 @@ switch (handlerName) {
         break;
     case 'getReportsHandler':
         handlerFunction = getReportsHandler;
+        break;
+    case 'getReportByIdHandler':
+        handlerFunction = getReportByIdHandler;
         break;
     default:
         handlerFunction = handler;

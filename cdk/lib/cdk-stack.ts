@@ -45,10 +45,10 @@ export class ReportGenCdkStack extends cdk.Stack {
         name: 'id',
         type: dynamodb.AttributeType.STRING,
       },
-      sortKey: {
-        name: 'sort',
-        type: dynamodb.AttributeType.STRING,
-      },
+      // sortKey: {
+      //   name: 'sort',
+      //   type: dynamodb.AttributeType.STRING,
+      // },
       removalPolicy: RemovalPolicy.DESTROY, // todo: in a real env this should be changed to retain
       deletionProtection: false, // todo: change after PoC
       tableName: `reports-table-${randomNumber}`,
@@ -221,6 +221,23 @@ export class ReportGenCdkStack extends cdk.Stack {
       deadLetterQueueEnabled: true,
     });
     reportsTable.grantReadData(lambdaGetReports);
+
+    const lambdaGetReportById = new Lambda.DockerImageFunction(this, 'lambdaGetReportById', {
+      code: Lambda.DockerImageCode.fromImageAsset(dockerfile),
+      environment: {
+        HANDLER_NAME: 'getReportByIdHandler',
+        REPORTS_TABLE_NAME: reportsTable.tableName,
+        S3_BUCKET_NAME: reportsBucket.bucketName,
+      },
+      architecture: Lambda.Architecture.X86_64,
+      description: "Lambda function that will get a single report by its ID",
+      functionName: `report-gen-01-get-report-by-id-${randomNumber}`,
+      deadLetterQueue: mainDeadLetterQueue,
+      deadLetterQueueEnabled: true,
+    });
+    reportsTable.grantReadWriteData(lambdaGetReportById);
+    reportsBucket.grantReadWrite(lambdaGetReportById); // we might need only read, but I'm not sure if presigned urls require write ( tbf )
+
     // --------------------- APIGateway ---------------------
     const apigw = new apigateway.RestApi(this, 'apigw', {
       restApiName: 'report-gen-01',
@@ -259,6 +276,9 @@ export class ReportGenCdkStack extends cdk.Stack {
     const getReportsList = new apigateway.LambdaIntegration(lambdaGetReports);
     const getReports = reportResource.addResource('list');
     getReports.addMethod(apigatewayv2.HttpMethod.GET, getReportsList);
+
+    const getReportById = new apigateway.LambdaIntegration(lambdaGetReportById);
+    reportResource.addMethod(apigatewayv2.HttpMethod.GET, getReportById);
 
   }
 }
